@@ -4,7 +4,7 @@
 
 /* Requires ------------------------------------------------------------------*/
 
-const { tween, basicParser, deferred, contextKey, recordKey } = require('./utils.js');
+const { basicParser, deferred, contextKey, recordKey } = require('./utils.js');
 
 /* Local variables -----------------------------------------------------------*/
 
@@ -17,8 +17,6 @@ function queue(config, emitter, targetStore) {
 
   // Local variables
   const contexts = new Map();
-  const timeoutError = new Error('TIMEOUT')
-  const retryCurve = tween(config.retry);
 
   /**
    * Attempts to read a query item from cache
@@ -72,7 +70,6 @@ function queue(config, emitter, targetStore) {
         promises: new Map(),
         params,
         batchData: {},
-        retryStep: 0,
         timer: null,
       };
       contexts.set(key, context);
@@ -82,7 +79,7 @@ function queue(config, emitter, targetStore) {
 
   /**
    * Gathers the ids in preparation for a data-source query
-   * @param {string} type The type of query (direct, batch or retry)
+   * @param {string} type The type of query (direct or batch)
    * @param {string} key The context key
    * @param {object} context The context object
    */
@@ -139,15 +136,12 @@ function queue(config, emitter, targetStore) {
 
   /**
    * Performs the query to the data-source
-   * @param {string} type The type of query (direct, batch or retry)
+   * @param {string} type The type of query (direct or batch)
    * @param {string} key The context key
    * @param {array} ids The ids to query
    * @param {object} context The context object
    */
   function query(type, key, ids, context, bd) {
-    let timer;
-    let is_cancelled;
-
     bd = bd || ids.reduce((acc, id) => {
       if (id in context.batchData) {
         if ([Number, String, Boolean].includes(context.batchData[id].constructor)) {
@@ -163,17 +157,12 @@ function queue(config, emitter, targetStore) {
     }, {});
 
     function handleQuerySuccess(results) {
-      if (is_cancelled === true) return;
-      clearTimeout(timer);
-      emitter.emit('querySuccess', { type, key, ids, params: context.params, step: (type === 'retry') ? context.retryStep : undefined, batchData: bd });
+      emitter.emit('querySuccess', { type, key, ids, params: context.params, batchData: bd });
       complete(key, ids, context, results);
     }
 
     function handleQueryError(err) {
-      if (err instanceof Error) return handleQueryCriticalError(err);
-      if (is_cancelled === true) return;
-      is_cancelled = true;
-      clearTimeout(timer);
+      emitter.emit('queryFailed', { type, key, ids, params: context.params, error: err, batchData: bd });
       for (let i = 0; i < ids.length; i++) {
         const expectation = context.promises.get(ids[i]);
         if (expectation !== undefined) {
@@ -186,52 +175,10 @@ function queue(config, emitter, targetStore) {
       }
     }
 
-    function handleQueryCriticalError(err, override) {
-      if (is_cancelled === true && override !== true) return;
-      is_cancelled = true;
-      clearTimeout(timer);
-      emitter.emit('queryFailed', { type, key, ids, params: context.params, error: err, step: (type === 'retry') ? context.retryStep : undefined, batchData: bd });
-      retry(key, ids, context, err);
-    }
-
-    emitter.emit('query', { type, key, ids, params: context.params, step: (type === 'retry') ? context.retryStep : undefined, batchData: bd });
-    if (config.timeout) {
-      timer = setTimeout(() => {
-        is_cancelled = true;
-        handleQueryCriticalError(timeoutError, true);
-      }, config.timeout);
-    }
+    emitter.emit('query', { type, key, ids, params: context.params, batchData: bd });
     Promise.resolve()
       .then(() => config.resolver(ids, context.params, bd))
-      .then(handleQuerySuccess, handleQueryError)
-      .catch(handleQueryCriticalError);
-  }
-
-  /**
-   * Query failure handler
-   * Assures the queries are properly retried after the configured amount of time
-   * @param {string} key The context key
-   * @param {array} ids The list of ids to query
-   * @param {object} context The context object
-   * @param {Error} err The error that caused the failure
-   */
-  function retry(key, ids, context, err, bd) {
-    context.retryStep = context.retryStep + 1;
-    if (config.retry && config.retry.steps >= context.retryStep) {
-      setTimeout(() => query('retry', key, ids, context, bd), Math.round(retryCurve(context.retryStep)));
-    }
-    else {
-      emitter.emit('retryCancelled', { key, ids, params: context.params, error: err, batchData: context.batchData });
-      for (let i = 0; i < ids.length; i++) {
-        const expectation = context.promises.get(ids[i]);
-        if (expectation !== undefined) {
-          expectation.reject(err);
-          context.promises.delete(ids[i]);
-        }
-      }
-
-      if (context.promises.size === 0) contexts.delete(context.key);
-    }
+      .then(handleQuerySuccess, handleQueryError);
   }
 
   /**
@@ -258,10 +205,7 @@ function queue(config, emitter, targetStore) {
       }
     }
 
-    if (context.ids.length > 0) {
-      context.retryStep = 0;
-    }
-    else {
+    if (context.ids.length === 0) {
       if (context.promises.size === 0) contexts.delete(context.key);
     }
   }
@@ -274,7 +218,7 @@ function queue(config, emitter, targetStore) {
     return contexts.size;
   }
 
-  return { batch, push, size, retry, query, resolveContext, complete };
+  return { batch, push, size, query, resolveContext, complete };
 }
 
 /* Exports -------------------------------------------------------------------*/

@@ -7,31 +7,6 @@
 /* Methods -------------------------------------------------------------------*/
 
 /**
- * Returns value for an exponential curve
- * @param {number} progress The p value for the curve
- * @param {number} start The start value for the curve
- * @param {number} end The end value for the curve
- * @returns {number} The exponential value
- */
-function exp(progress, start, end) {
-  return start + (end - start) * (progress * progress);
-}
-
-/**
- * Returns a curve object based on the common curve options
- * @param {object} opts The config for the curve (base, limit, step, curve)
- * @returns {object} The curve object
- */
-function tween(opts) {
-  let step = 0;
-
-  return function _tweenStep(progress) {
-    if (progress === undefined) step++;
-    return (opts.curve || exp)(Math.min(1, ((progress === undefined) ? step : progress / (opts.steps || 1))), opts.base, opts.limit);
-  };
-}
-
-/**
  * Parses the results from the data-source query
  * @param {*} results The raw results
  * @param {array} ids The list of ids to look for in the response
@@ -113,4 +88,4 @@ function recordKey(context, id) {
 
 /* Exports -------------------------------------------------------------------*/
 
-module.exports = { deferred, exp, tween, basicParser, contextKey, recordKey };
+module.exports = { deferred, basicParser, contextKey, recordKey };
