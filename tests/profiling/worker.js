@@ -67,9 +67,9 @@ function complete() {
 
         // console.log(v8.getHeapSpaceStatistics().map(parseMemorySpace));
 
-        heapdump.writeSnapshot((err, filename) => {
+        /*heapdump.writeSnapshot((err, filename) => {
             console.log('Heap dump written to', filename)
-        });
+        });*/
 
         process.send(suite);
         process.exit(0);
